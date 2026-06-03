@@ -110,6 +110,8 @@ app.post("/api/enrichir", async (req, res) => {
       );
       console.log("INSEE RP:", r4.status, "obs:", r4.data?.observations?.length);
       const obs = r4.data?.observations || [];
+      const agesSeen = [...new Set(obs.map(o => o.dimensions?.AGE))];
+console.log("INSEE RP ages disponibles:", JSON.stringify(agesSeen));
       let total = 0, s60 = 0, s75 = 0, s85 = 0;
       obs.forEach((o) => {
         const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
