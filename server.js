@@ -113,21 +113,21 @@ app.post("/api/enrichir", async (req, res) => {
       const agesSeen = [...new Set(obs.map(o => o.dimensions?.AGE))];
 console.log("INSEE RP ages disponibles:", JSON.stringify(agesSeen));
       let total = 0, s60 = 0, s75 = 0, s85 = 0;
-      obs.forEach((o) => {
-        const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
-        const age = o.dimensions?.AGE || "";
-        if (isNaN(v) || v <= 0) return;
-        total += v;
-        if (["Y60T64","Y65T69","Y70T74","Y75T79","Y80T84","Y85T89","Y_GE90","Y_GE85","Y_GE75","Y_GE60"].includes(age)) s60 += v;
-        if (["Y75T79","Y80T84","Y85T89","Y_GE90","Y_GE85","Y_GE75"].includes(age)) s75 += v;
-        if (["Y85T89","Y_GE90","Y_GE85"].includes(age)) s85 += v;
-      });
-      if (total > 0) {
-        set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
-        set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
-        set("v3", s85 / total * 100, "INSEE RP 2022", "commune");
-        results["_meta_rp"] = { valeur: Math.round(total) + " hab. recensés", source: "INSEE RP 2022", niveau: "commune" };
-      }
+     obs.forEach((o) => {
+  const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
+  const age = o.dimensions?.AGE || "";
+  const sex = o.dimensions?.SEX || "";
+  // Ne prendre que le total (tous sexes)
+  if (sex !== "_T") return;
+  if (isNaN(v) || v <= 0) return;
+  if (age === "_T") total += v;
+  if (["Y_GE65", "Y_GE80"].includes(age)) s60 += v;
+  if (age === "Y_GE80") { s75 += v; s85 += v; }
+});
+if (total > 0) {
+  set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
+  set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
+}
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
     // 5. BPE — équipements santé (format GEO et FACILITY_TYPE corrigés)
