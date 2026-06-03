@@ -48,6 +48,8 @@ app.post("/api/enrichir", async (req, res) => {
   try {
     const { citycode, city, lat, lon } = req.body;
     const results = {};
+    // Format GEO Melodi : 2025-COM-XXXXX
+    const geoCode = "2025-COM-" + citycode;
 
     function set(id, val, source, niveau) {
       if (val !== null && val !== undefined && !isNaN(parseFloat(val))) {
@@ -101,21 +103,56 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. INSEE RP — debug structure
+    // 4. INSEE RP — population par âge (format GEO corrigé)
     try {
-      const urlRp = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?maxResult=3&page=1";
-      const r4 = await inseeAxios.get(urlRp);
-      console.log("INSEE RP test:", r4.status, "obs:", r4.data?.observations?.length);
-      console.log("INSEE RP sample:", JSON.stringify(r4.data?.observations?.slice(0, 2)));
+      const r4 = await inseeAxios.get(
+        "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=500&page=1"
+      );
+      console.log("INSEE RP:", r4.status, "obs:", r4.data?.observations?.length);
+      const obs = r4.data?.observations || [];
+      let total = 0, s60 = 0, s75 = 0, s85 = 0;
+      obs.forEach((o) => {
+        const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
+        const age = o.dimensions?.AGE || "";
+        if (isNaN(v) || v <= 0) return;
+        total += v;
+        if (["Y60T64","Y65T69","Y70T74","Y75T79","Y80T84","Y85T89","Y_GE90","Y_GE85","Y_GE75","Y_GE60"].includes(age)) s60 += v;
+        if (["Y75T79","Y80T84","Y85T89","Y_GE90","Y_GE85","Y_GE75"].includes(age)) s75 += v;
+        if (["Y85T89","Y_GE90","Y_GE85"].includes(age)) s85 += v;
+      });
+      if (total > 0) {
+        set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
+        set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
+        set("v3", s85 / total * 100, "INSEE RP 2022", "commune");
+        results["_meta_rp"] = { valeur: Math.round(total) + " hab. recensés", source: "INSEE RP 2022", niveau: "commune" };
+      }
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-    // 5. BPE — debug structure
+    // 5. BPE — équipements santé (format GEO et FACILITY_TYPE corrigés)
     try {
-      const urlBpe = "https://api.insee.fr/melodi/data/DS_BPE?maxResult=3&page=1";
-      const r5 = await inseeAxios.get(urlBpe);
-      console.log("BPE test:", r5.status, "obs:", r5.data?.observations?.length);
-      console.log("BPE sample:", JSON.stringify(r5.data?.observations?.slice(0, 2)));
+      const r5 = await inseeAxios.get(
+        "https://api.insee.fr/melodi/data/DS_BPE?GEO=" + geoCode + "&TIME_PERIOD=2024&maxResult=200&page=1"
+      );
+      console.log("BPE:", r5.status, "obs:", r5.data?.observations?.length);
+      const obs = r5.data?.observations || [];
+      let medecins = 0, pharmacies = 0, ehpad = 0;
+      obs.forEach((o) => {
+        const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
+        const type = o.dimensions?.FACILITY_TYPE || "";
+        if (isNaN(v) || v <= 0) return;
+        if (type === "D201") medecins += v;
+        if (type === "D401") pharmacies += v;
+        if (type === "D109" || type === "D110") ehpad += v;
+      });
+      const partenaires = (medecins > 0 ? 1 : 0) + (ehpad > 0 ? 2 : 0) + (pharmacies > 0 ? 1 : 0);
+      if (partenaires > 0) set("pt1", partenaires, "INSEE BPE 2024", "commune");
+      if (medecins > 0 || pharmacies > 0 || ehpad > 0) {
+        results["_meta_bpe"] = { valeur: Math.round(medecins) + " médecins, " + Math.round(pharmacies) + " pharmacies, " + Math.round(ehpad) + " EHPAD", source: "INSEE BPE 2024", niveau: "commune" };
+      }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
+
+    // 6. Filosofi — non disponible via Melodi, saisie manuelle
+    console.log("Filosofi: saisie manuelle requise");
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
@@ -124,6 +161,6 @@ app.post("/api/enrichir", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Agenda21 Backend démarré sur le port ${PORT}`));
