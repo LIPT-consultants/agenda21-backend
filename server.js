@@ -137,6 +137,8 @@ if (total > 0) {
       );
       console.log("BPE:", r5.status, "obs:", r5.data?.observations?.length);
       const obs = r5.data?.observations || [];
+      const typesSeen = [...new Set(obs.map(o => o.dimensions?.FACILITY_TYPE))].slice(0,20);
+console.log("BPE types disponibles:", JSON.stringify(typesSeen));
       let medecins = 0, pharmacies = 0, ehpad = 0;
       obs.forEach((o) => {
         const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
