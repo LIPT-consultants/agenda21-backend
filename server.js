@@ -136,9 +136,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-    // 5. BPE — services médicaux et sociaux (DS_BPE_SANTE)
+    // 5. BPE — services médicaux et sociaux (DS_BPE)
     try {
-      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_BPE_SANTE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200");
+      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_BPE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200");
       console.log("BPE Santé:", r.status);
       const series = r.data?.dataSets?.[0]?.series;
       if (series) {
@@ -159,9 +159,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-    // 6. Filosofi — pauvreté et revenus (DS_FILOSOFI_COM)
+    // 6. Filosofi — pauvreté et revenus (DS_FILOSOFI_MEN_TP_NIVVIE)
     try {
-      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_FILOSOFI_COM?GEO=COM-" + citycode + "&TIME_PERIOD=2020&maxResult=100");
+      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_FILOSOFI_MEN_TP_NIVVIE?GEO=COM-" + citycode + "&TIME_PERIOD=2020&maxResult=100");
       console.log("Filosofi:", r.status);
       const series = r.data?.dataSets?.[0]?.series;
       if (series) {
