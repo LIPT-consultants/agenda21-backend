@@ -111,14 +111,14 @@ app.post("/api/enrichir", async (req, res) => {
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
 // TEST — INSEE RP sans filtre GEO
-const url = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?maxResult=3&page=1";
-const r = await inseeAxios.get(url);
+const urlRp = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?maxResult=3&page=1";
+const r = await inseeAxios.get(urlRp);
 console.log("INSEE RP test:", r.status);
 console.log("INSEE RP obs sample:", JSON.stringify(r.data?.observations?.slice(0,2)));
 
 // TEST — BPE sans filtre GEO  
-const url = "https://api.insee.fr/melodi/data/DS_BPE?maxResult=3&page=1";
-const r = await inseeAxios.get(url);
+const urlBpe = "https://api.insee.fr/melodi/data/DS_BPE?maxResult=3&page=1";
+const r = await inseeAxios.get(urlBpe);
 console.log("BPE test:", r.status);
 console.log("BPE obs sample:", JSON.stringify(r.data?.observations?.slice(0,2)));
 
