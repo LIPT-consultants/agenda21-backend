@@ -164,6 +164,15 @@ console.log("BPE types disponibles:", JSON.stringify(typesSeen));
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
+// DEBUG — ménages seuls DS_RP_MENAGES_COMP
+try {
+  const r6 = await inseeAxios.get(
+    "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=3&page=1"
+  );
+  console.log("RP Ménages:", r6.status, "obs:", r6.data?.observations?.length);
+  console.log("RP Ménages sample:", JSON.stringify(r6.data?.observations?.slice(0, 2)));
+} catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
+    
     // 6. Filosofi — non disponible via Melodi, saisie manuelle
     console.log("Filosofi: saisie manuelle requise");
 
