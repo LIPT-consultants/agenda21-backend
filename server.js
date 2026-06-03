@@ -164,25 +164,18 @@ console.log("BPE types disponibles:", JSON.stringify(typesSeen));
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-// DEBUG — ménages seuls DS_RP_MENAGES_COMP
+// DEBUG — codes ménages seuls
 try {
   const r6 = await inseeAxios.get(
-    "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=3&page=1"
+    "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=200&page=1"
   );
   console.log("RP Ménages:", r6.status, "obs:", r6.data?.observations?.length);
-  console.log("RP Ménages sample:", JSON.stringify(r6.data?.observations?.slice(0, 2)));
+  const obs6 = r6.data?.observations || [];
+  const tphSeen = [...new Set(obs6.map(o => o.dimensions?.TPH))];
+  const prefphSeen = [...new Set(obs6.map(o => o.dimensions?.PREFPH))];
+  console.log("TPH disponibles:", JSON.stringify(tphSeen));
+  console.log("PREFPH disponibles:", JSON.stringify(prefphSeen));
 } catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
-    
-    // 6. Filosofi — non disponible via Melodi, saisie manuelle
-    console.log("Filosofi: saisie manuelle requise");
-
-    console.log("Résultats finaux:", Object.keys(results));
-    res.json(results);
-  } catch (err) {
-    console.log("Erreur globale:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Agenda21 Backend démarré sur le port ${PORT}`));
