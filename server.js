@@ -20,7 +20,6 @@ const defaultAxios = axios.create({
 
 app.get("/", (req, res) => res.json({ status: "ok", app: "Agenda21 Longévité Backend" }));
 
-// ─── ROUTE ANALYSE ─────────────────────────────────────────────────────────────
 app.post("/api/analyse", async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -43,12 +42,10 @@ app.post("/api/analyse", async (req, res) => {
   }
 });
 
-// ─── ROUTE ENRICHIR ────────────────────────────────────────────────────────────
 app.post("/api/enrichir", async (req, res) => {
   try {
     const { citycode, city, lat, lon } = req.body;
     const results = {};
-    // Format GEO Melodi : 2025-COM-XXXXX
     const geoCode = "2025-COM-" + citycode;
 
     function set(id, val, source, niveau) {
@@ -103,53 +100,40 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. INSEE RP — population par âge (format GEO corrigé)
+    // 4. INSEE RP — population par âge
     try {
       const r4 = await inseeAxios.get(
         "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=500&page=1"
       );
       console.log("INSEE RP:", r4.status, "obs:", r4.data?.observations?.length);
-      const obs = r4.data?.observations || [];
-      const agesSeen = [...new Set(obs.map(o => o.dimensions?.AGE))];
-console.log("INSEE RP ages disponibles:", JSON.stringify(agesSeen));
-      let total = 0, s60 = 0, s75 = 0, s85 = 0;
-     obs.forEach((o) => {
-  const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
-  const age = o.dimensions?.AGE || "";
-  const sex = o.dimensions?.SEX || "";
-  // Ne prendre que le total (tous sexes)
-  if (sex !== "_T") return;
-  if (isNaN(v) || v <= 0) return;
-  if (age === "_T") total += v;
-  if (["Y_GE65", "Y_GE80"].includes(age)) s60 += v;
-  if (age === "Y_GE80") { s75 += v; s85 += v; }
-});
-if (total > 0) {
-  set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
-  set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
-}
+      const obs4 = r4.data?.observations || [];
+      let total = 0, s60 = 0, s75 = 0;
+      obs4.forEach((o) => {
+        const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
+        const age = o.dimensions?.AGE || "";
+        const sex = o.dimensions?.SEX || "";
+        if (sex !== "_T") return;
+        if (isNaN(v) || v <= 0) return;
+        if (age === "_T") total += v;
+        if (["Y_GE65", "Y_GE80"].includes(age)) s60 += v;
+        if (age === "Y_GE80") s75 += v;
+      });
+      if (total > 0) {
+        set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
+        set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
+        results["_meta_rp"] = { valeur: Math.round(total) + " hab. recensés", source: "INSEE RP 2022", niveau: "commune" };
+      }
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-// DEBUG — RP Logement pour v8/v9
-try {
-  const r6 = await inseeAxios.get(
-    "https://api.insee.fr/melodi/data/DS_RP_LOGEMENT?GEO=" + geoCode + "&TIME_PERIOD=2021&maxResult=3&page=1"
-  );
-  console.log("RP Logement:", r6.status, "obs:", r6.data?.observations?.length);
-  console.log("RP Logement sample:", JSON.stringify(r6.data?.observations?.slice(0, 2)));
-} catch (e) { console.log("RP Logement error:", e.response?.status, e.message); }
-    
-    // 5. BPE — équipements santé (format GEO et FACILITY_TYPE corrigés)
+    // 5. BPE — équipements santé
     try {
       const r5 = await inseeAxios.get(
         "https://api.insee.fr/melodi/data/DS_BPE?GEO=" + geoCode + "&TIME_PERIOD=2024&maxResult=200&page=1"
       );
       console.log("BPE:", r5.status, "obs:", r5.data?.observations?.length);
-      const obs = r5.data?.observations || [];
-      const typesSeen = [...new Set(obs.map(o => o.dimensions?.FACILITY_TYPE))].slice(0,20);
-console.log("BPE types disponibles:", JSON.stringify(typesSeen));
+      const obs5 = r5.data?.observations || [];
       let medecins = 0, pharmacies = 0, ehpad = 0;
-      obs.forEach((o) => {
+      obs5.forEach((o) => {
         const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
         const type = o.dimensions?.FACILITY_TYPE || "";
         if (isNaN(v) || v <= 0) return;
@@ -164,18 +148,26 @@ console.log("BPE types disponibles:", JSON.stringify(typesSeen));
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-// DEBUG — codes ménages seuls
-try {
-  const r6 = await inseeAxios.get(
-    "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=200&page=1"
-  );
-  console.log("RP Ménages:", r6.status, "obs:", r6.data?.observations?.length);
-  const obs6 = r6.data?.observations || [];
-  const tphSeen = [...new Set(obs6.map(o => o.dimensions?.TPH))];
-  const prefphSeen = [...new Set(obs6.map(o => o.dimensions?.PREFPH))];
-  console.log("TPH disponibles:", JSON.stringify(tphSeen));
-  console.log("PREFPH disponibles:", JSON.stringify(prefphSeen));
-} catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
+    // 6. RP Ménages — debug TPH et PREFPH
+    try {
+      const r6 = await inseeAxios.get(
+        "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=200&page=1"
+      );
+      console.log("RP Ménages:", r6.status, "obs:", r6.data?.observations?.length);
+      const obs6 = r6.data?.observations || [];
+      const tphSeen = [...new Set(obs6.map((o) => o.dimensions?.TPH))];
+      const prefphSeen = [...new Set(obs6.map((o) => o.dimensions?.PREFPH))];
+      console.log("TPH disponibles:", JSON.stringify(tphSeen));
+      console.log("PREFPH disponibles:", JSON.stringify(prefphSeen));
+    } catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
+
+    console.log("Résultats finaux:", Object.keys(results));
+    res.json(results);
+  } catch (err) {
+    console.log("Erreur globale:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Agenda21 Backend démarré sur le port ${PORT}`));
