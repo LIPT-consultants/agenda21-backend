@@ -159,26 +159,28 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-// 6. Filosofi — taux pauvreté et revenu médian
+// 6. Filosofi — via API statistiques locales INSEE
 try {
-  const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_FILOSOFI_MEN_TP_NIVVIE?GEO=COM+" + citycode + "&TIME_PERIOD=2020&maxResult=100");
-      console.log("Filosofi:", r.status);
-      const series = r.data?.dataSets?.[0]?.series;
-      if (series) {
-        Object.entries(series).forEach(([key, val]) => {
-          const obs = Object.values(val.observations || {});
-          const v = parseFloat(obs[0]?.[0]);
-          if (isNaN(v) || v <= 0) return;
-          if (key.includes("TP60") || key.includes("TPOVR")) {
-            set("v14", v / 100 * 0.35, "INSEE Filosofi 2020", "commune");
-            results["_meta_pauvrete"] = { valeur: "Taux pauvreté : " + v + "%", source: "INSEE Filosofi 2020", niveau: "commune" };
-          }
-          if ((key.includes("MED") || key.includes("Q2")) && v > 1000) {
-            results["_meta_revenu"] = { valeur: Math.round(v) + " €/an (revenu médian)", source: "INSEE Filosofi 2020", niveau: "commune" };
-          }
-        });
+  const r = await inseeAxios.get(
+    "https://statistiques-locales.insee.fr/data/GEO/COM/" + citycode + "/FILOSOFI/MEN/INDIC/TP60,MED/2020/1"
+  );
+  console.log("Filosofi stats locales:", r.status);
+  const d = r.data;
+  if (d && Array.isArray(d)) {
+    d.forEach((item) => {
+      const code = item.indic || item.INDIC || item.code;
+      const val = parseFloat(item.valeur || item.OBS_VALUE || item.val);
+      if (isNaN(val) || val <= 0) return;
+      if (code === "TP60") {
+        set("v14", val / 100 * 0.35, "INSEE Filosofi 2020", "commune");
+        results["_meta_pauvrete"] = { valeur: "Taux pauvreté : " + val + "%", source: "INSEE Filosofi 2020", niveau: "commune" };
       }
-    } catch (e) { console.log("Filosofi error:", e.response?.status, e.message); }
+      if (code === "MED") {
+        results["_meta_revenu"] = { valeur: Math.round(val) + " €/an (revenu médian)", source: "INSEE Filosofi 2020", niveau: "commune" };
+      }
+    });
+  }
+} catch (e) { console.log("Filosofi stats locales error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
