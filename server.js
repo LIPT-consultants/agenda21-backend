@@ -110,54 +110,19 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. INSEE RP — population par âge (DS_RP_POPULATION_PRINC)
-    try {
-      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=COM-" + citycode + "&TIME_PERIOD=2021&maxResult=500");
-      console.log("INSEE RP Melodi:", r.status);
-      const series = r.data?.dataSets?.[0]?.series;
-      if (series) {
-        let total = 0, s60 = 0, s75 = 0, s85 = 0;
-        Object.entries(series).forEach(([key, val]) => {
-          const obs = Object.values(val.observations || {});
-          const v = parseFloat(obs[0]?.[0] || 0);
-          if (isNaN(v)) return;
-          total += v;
-          // Les codes AGE dans DS_RP_POPULATION_PRINC : Y_GE60, Y_GE75, Y_GE85 ou tranches
-          if (key.match(/Y60|Y61|Y62|Y63|Y64|Y65|Y66|Y67|Y68|Y69|Y70|Y71|Y72|Y73|Y74|Y_GE60/)) s60 += v;
-          if (key.match(/Y75|Y76|Y77|Y78|Y79|Y80|Y81|Y82|Y83|Y84|Y_GE75/)) { s60 += v; s75 += v; }
-          if (key.match(/Y85|Y86|Y87|Y88|Y89|Y90|Y91|Y92|Y93|Y94|Y95|Y96|Y97|Y98|Y99|Y_GE85/)) { s60 += v; s75 += v; s85 += v; }
-        });
-        if (total > 0) {
-          set("v1", s60 / total * 100, "INSEE RP 2021", "commune");
-          set("v2", s75 / total * 100, "INSEE RP 2021", "commune");
-          set("v3", s85 / total * 100, "INSEE RP 2021", "commune");
-          results["_meta_rp"] = { valeur: "Pop. totale RP : " + Math.round(total) + " hab.", source: "INSEE RP 2021", niveau: "commune" };
-        }
-      }
-    } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
+// 4. INSEE RP — population par âge
+try {
+  const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=COM-" + citycode + "&TIME_PERIOD=2021&maxResult=500");
+  console.log("INSEE RP Melodi:", r.status);
+  console.log("INSEE RP structure:", JSON.stringify(r.data).slice(0, 500));
+} catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-    // 5. BPE — services médicaux et sociaux (DS_BPE)
-    try {
-      const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_BPE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200");
-      console.log("BPE Santé:", r.status);
-      const series = r.data?.dataSets?.[0]?.series;
-      if (series) {
-        let medecins = 0, pharmacies = 0, ehpad = 0;
-        Object.entries(series).forEach(([key, val]) => {
-          const obs = Object.values(val.observations || {});
-          const v = parseFloat(obs[0]?.[0] || 0);
-          if (isNaN(v)) return;
-          if (key.includes("D201")) medecins += v;
-          if (key.includes("D401")) pharmacies += v;
-          if (key.includes("D109") || key.includes("D110")) ehpad += v;
-        });
-        const partenaires = (medecins > 0 ? 1 : 0) + (ehpad > 0 ? 2 : 0) + (pharmacies > 0 ? 1 : 0);
-        if (partenaires > 0) set("pt1", partenaires, "INSEE BPE 2023", "commune");
-        if (medecins > 0 || pharmacies > 0 || ehpad > 0) {
-          results["_meta_bpe"] = { valeur: Math.round(medecins) + " médecins, " + Math.round(pharmacies) + " pharmacies, " + Math.round(ehpad) + " EHPAD", source: "INSEE BPE 2023", niveau: "commune" };
-        }
-      }
-    } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
+    // 5. BPE
+try {
+  const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_BPE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200");
+  console.log("BPE Santé:", r.status);
+  console.log("BPE structure:", JSON.stringify(r.data).slice(0, 500));
+} catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
 // 6. Filosofi — non disponible via Melodi (dataset retiré)
 // v14 (taux d'effort seniors) à saisir manuellement
