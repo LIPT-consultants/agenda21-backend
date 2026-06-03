@@ -100,32 +100,31 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. INSEE RP — population par âge
+    // 4. INSEE RP — population par âge (v1, v2)
     try {
       const r4 = await inseeAxios.get(
         "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=500&page=1"
       );
       console.log("INSEE RP:", r4.status, "obs:", r4.data?.observations?.length);
       const obs4 = r4.data?.observations || [];
-      let total = 0, s60 = 0, s75 = 0;
+      let total = 0, s65 = 0, s80 = 0;
       obs4.forEach((o) => {
         const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
         const age = o.dimensions?.AGE || "";
         const sex = o.dimensions?.SEX || "";
-        if (sex !== "_T") return;
-        if (isNaN(v) || v <= 0) return;
+        if (sex !== "_T" || isNaN(v) || v <= 0) return;
         if (age === "_T") total += v;
-        if (["Y_GE65", "Y_GE80"].includes(age)) s60 += v;
-        if (age === "Y_GE80") s75 += v;
+        if (age === "Y_GE65") s65 += v;
+        if (age === "Y_GE80") s80 += v;
       });
       if (total > 0) {
-        set("v1", s60 / total * 100, "INSEE RP 2022", "commune");
-        set("v2", s75 / total * 100, "INSEE RP 2022", "commune");
+        set("v1", (s65 + s80) / total * 100, "INSEE RP 2022", "commune");
+        set("v2", s80 / total * 100, "INSEE RP 2022", "commune");
         results["_meta_rp"] = { valeur: Math.round(total) + " hab. recensés", source: "INSEE RP 2022", niveau: "commune" };
       }
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-    // 5. BPE — équipements santé
+    // 5. BPE — équipements santé (pt1)
     try {
       const r5 = await inseeAxios.get(
         "https://api.insee.fr/melodi/data/DS_BPE?GEO=" + geoCode + "&TIME_PERIOD=2024&maxResult=200&page=1"
@@ -148,19 +147,27 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-    // 6. RP Ménages — debug TPH et PREFPH
+    // 6. RP Ménages — ménages seuls v8 (approximation tous âges)
     try {
       const r6 = await inseeAxios.get(
         "https://api.insee.fr/melodi/data/DS_RP_MENAGES_COMP?GEO=" + geoCode + "&TIME_PERIOD=2022&maxResult=200&page=1"
       );
       console.log("RP Ménages:", r6.status, "obs:", r6.data?.observations?.length);
       const obs6 = r6.data?.observations || [];
-      const tphSeen = [...new Set(obs6.map((o) => o.dimensions?.TPH))];
-      const prefphSeen = [...new Set(obs6.map((o) => o.dimensions?.PREFPH))];
-      console.log("TPH disponibles:", JSON.stringify(tphSeen));
-      console.log("PREFPH disponibles:", JSON.stringify(prefphSeen));
-      const obs6sample = obs6.filter(o => o.dimensions?.TPH === "11").slice(0, 5);
-console.log("Ménages seuls sample:", JSON.stringify(obs6sample));
+      let totalMenages = 0, seuls = 0;
+      obs6.forEach((o) => {
+        const v = parseFloat(o.measures?.OBS_VALUE_NIVEAU?.value || 0);
+        const tph = o.dimensions?.TPH || "";
+        const prefph = o.dimensions?.PREFPH || "";
+        const measure = o.dimensions?.RP_MEASURE || "";
+        if (measure !== "DWELLINGS" || prefph !== "_T" || isNaN(v) || v <= 0) return;
+        if (tph === "_T") totalMenages += v;
+        if (tph === "11") seuls += v;
+      });
+      if (totalMenages > 0 && seuls > 0) {
+        set("v8", seuls / totalMenages * 100, "INSEE RP Ménages 2022", "commune");
+        results["_meta_menages"] = { valeur: Math.round(seuls) + " ménages d'une personne / " + Math.round(totalMenages) + " total", source: "INSEE RP Ménages 2022", niveau: "commune" };
+      }
     } catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
