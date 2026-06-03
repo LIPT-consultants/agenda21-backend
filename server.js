@@ -110,18 +110,49 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-// 4. INSEE RP — population par âge
+// 4. INSEE RP — population par âge (avec pagination Melodi)
 try {
-  const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=COM-" + citycode + "&TIME_PERIOD=2021&maxResult=500");
-  console.log("INSEE RP Melodi:", r.status);
-  console.log("INSEE RP structure:", JSON.stringify(r.data).slice(0, 500));
+  const url = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?GEO=COM-" + citycode + "&TIME_PERIOD=2021&maxResult=500&page=1";
+  const r = await inseeAxios.get(url);
+  console.log("INSEE RP Melodi:", r.status, "obs:", r.data?.observations?.length);
+  const obs = r.data?.observations || [];
+  let total = 0, s60 = 0, s75 = 0, s85 = 0;
+  obs.forEach((o) => {
+    const v = parseFloat(o.OBS_VALUE || o.valeur || 0);
+    if (isNaN(v)) return;
+    const age = o.AGE || o.AGEPYR5 || o.age || "";
+    total += v;
+    if (age.match(/^Y_GE60$|^6[0-9]|^7[0-4]/)) s60 += v;
+    if (age.match(/^Y_GE75$|^7[5-9]|^8[0-4]/)) { s60 += v; s75 += v; }
+    if (age.match(/^Y_GE85$|^8[5-9]|^9[0-9]|^Y_GE90/)) { s60 += v; s75 += v; s85 += v; }
+  });
+  if (total > 0) {
+    set("v1", s60 / total * 100, "INSEE RP 2021", "commune");
+    set("v2", s75 / total * 100, "INSEE RP 2021", "commune");
+    set("v3", s85 / total * 100, "INSEE RP 2021", "commune");
+    results["_meta_rp"] = { valeur: Math.round(total) + " hab. recensés", source: "INSEE RP 2021", niveau: "commune" };
+  }
 } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-    // 5. BPE
+// 5. BPE — équipements santé (avec pagination Melodi)
 try {
-  const r = await inseeAxios.get("https://api.insee.fr/melodi/data/DS_BPE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200");
-  console.log("BPE Santé:", r.status);
-  console.log("BPE structure:", JSON.stringify(r.data).slice(0, 500));
+  const url = "https://api.insee.fr/melodi/data/DS_BPE?GEO=COM-" + citycode + "&TIME_PERIOD=2023&maxResult=200&page=1";
+  const r = await inseeAxios.get(url);
+  console.log("BPE Santé:", r.status, "obs:", r.data?.observations?.length);
+  const obs = r.data?.observations || [];
+  let medecins = 0, pharmacies = 0, ehpad = 0;
+  obs.forEach((o) => {
+    const v = parseFloat(o.OBS_VALUE || o.valeur || 0);
+    const type = o.TYPEQU || o.FACILITY_TYPE || o.typequ || "";
+    if (type === "D201") medecins += v;
+    if (type === "D401") pharmacies += v;
+    if (type === "D109" || type === "D110") ehpad += v;
+  });
+  const partenaires = (medecins > 0 ? 1 : 0) + (ehpad > 0 ? 2 : 0) + (pharmacies > 0 ? 1 : 0);
+  if (partenaires > 0) set("pt1", partenaires, "INSEE BPE 2023", "commune");
+  if (medecins > 0 || pharmacies > 0 || ehpad > 0) {
+    results["_meta_bpe"] = { valeur: Math.round(medecins) + " médecins, " + Math.round(pharmacies) + " pharmacies, " + Math.round(ehpad) + " EHPAD", source: "INSEE BPE 2023", niveau: "commune" };
+  }
 } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
 // 6. Filosofi — non disponible via Melodi (dataset retiré)
