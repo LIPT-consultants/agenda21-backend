@@ -55,19 +55,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     }
 
-    // Helper: extraire une valeur d'une série Melodi
-    function getMelodiVal(series, keyFragment) {
-      if (!series) return null;
-      const entry = Object.entries(series).find(([k]) => k.includes(keyFragment));
-      if (!entry) return null;
-      const obs = Object.values(entry[1].observations || {});
-      return obs[0]?.[0] ?? null;
-    }
-
     // 1. API Geo
     try {
-      const r = await defaultAxios.get("https://geo.api.gouv.fr/communes/" + citycode + "?fields=nom,population,codeDepartement,codeRegion,epci");
-      const d = r.data;
+      const r1 = await defaultAxios.get("https://geo.api.gouv.fr/communes/" + citycode + "?fields=nom,population,codeDepartement,codeRegion,epci");
+      const d = r1.data;
       if (d.population) {
         results["_meta_population"] = { valeur: String(d.population), source: "API Geo gouv.fr", niveau: "commune" };
         results["_meta_seniors"] = { valeur: "Pop. " + d.population + " hab. (75+ estimés ~" + Math.round(d.population * 0.085) + ")", source: "API Geo + benchmark INSEE 2023", niveau: "commune" };
@@ -79,9 +70,9 @@ app.post("/api/enrichir", async (req, res) => {
     // 2. Georisques
     try {
       if (lat && lon) {
-        const r = await defaultAxios.get("https://georisques.gouv.fr/api/v1/gaspar/risques?rayon=1000&latlon=" + lon + "," + lat + "&page=1&page_size=20");
-        console.log("Georisques:", r.status);
-        const d = r.data;
+        const r2 = await defaultAxios.get("https://georisques.gouv.fr/api/v1/gaspar/risques?rayon=1000&latlon=" + lon + "," + lat + "&page=1&page_size=20");
+        console.log("Georisques:", r2.status);
+        const d = r2.data;
         if (d && d.data && d.data.length > 0) {
           const risques = d.data.map((x) => x.libelle_risque_jo || x.code_risque).filter(Boolean);
           results["_meta_georisques"] = { valeur: "Risques : " + risques.slice(0, 5).join(", "), source: "Georisques 2026", niveau: "adresse" };
@@ -92,12 +83,12 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Georisques error:", e.message); }
 
-    // 3. ADEME DPE — recherche par nom de ville
+    // 3. ADEME DPE
     try {
       const cityEncoded = encodeURIComponent(city || "");
-      const r = await defaultAxios.get("https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&q=" + cityEncoded);
-      console.log("ADEME DPE:", r.status, "résultats:", r.data?.results?.length);
-      const d = r.data;
+      const r3 = await defaultAxios.get("https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&q=" + cityEncoded);
+      console.log("ADEME DPE:", r3.status, "résultats:", r3.data?.results?.length);
+      const d = r3.data;
       if (d.results && d.results.length > 0) {
         let total = d.results.length, efg = 0, renove = 0;
         d.results.forEach((x) => {
@@ -110,21 +101,21 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-// TEST — INSEE RP sans filtre GEO
-const urlRp = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?maxResult=3&page=1";
-const r = await inseeAxios.get(urlRp);
-console.log("INSEE RP test:", r.status);
-console.log("INSEE RP obs sample:", JSON.stringify(r.data?.observations?.slice(0,2)));
+    // 4. INSEE RP — debug structure
+    try {
+      const urlRp = "https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC?maxResult=3&page=1";
+      const r4 = await inseeAxios.get(urlRp);
+      console.log("INSEE RP test:", r4.status, "obs:", r4.data?.observations?.length);
+      console.log("INSEE RP sample:", JSON.stringify(r4.data?.observations?.slice(0, 2)));
+    } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
-// TEST — BPE sans filtre GEO  
-const urlBpe = "https://api.insee.fr/melodi/data/DS_BPE?maxResult=3&page=1";
-const r = await inseeAxios.get(urlBpe);
-console.log("BPE test:", r.status);
-console.log("BPE obs sample:", JSON.stringify(r.data?.observations?.slice(0,2)));
-
-// 6. Filosofi — non disponible via Melodi (dataset retiré)
-// v14 (taux d'effort seniors) à saisir manuellement
-console.log("Filosofi: non disponible via API, saisie manuelle requise");
+    // 5. BPE — debug structure
+    try {
+      const urlBpe = "https://api.insee.fr/melodi/data/DS_BPE?maxResult=3&page=1";
+      const r5 = await inseeAxios.get(urlBpe);
+      console.log("BPE test:", r5.status, "obs:", r5.data?.observations?.length);
+      console.log("BPE sample:", JSON.stringify(r5.data?.observations?.slice(0, 2)));
+    } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
