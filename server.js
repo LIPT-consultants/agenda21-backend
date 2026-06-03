@@ -159,6 +159,8 @@ app.post("/api/enrichir", async (req, res) => {
       const prefphSeen = [...new Set(obs6.map((o) => o.dimensions?.PREFPH))];
       console.log("TPH disponibles:", JSON.stringify(tphSeen));
       console.log("PREFPH disponibles:", JSON.stringify(prefphSeen));
+      const obs6sample = obs6.filter(o => o.dimensions?.TPH === "11").slice(0, 5);
+console.log("Ménages seuls sample:", JSON.stringify(obs6sample));
     } catch (e) { console.log("RP Ménages error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
