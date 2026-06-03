@@ -7,7 +7,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Agent HTTPS qui ignore les erreurs de certificat SSL (pour data.insee.fr)
+// Agent SSL permissif pour data.insee.fr (certificat non reconnu par Railway)
 const inseeAgent = new https.Agent({ rejectUnauthorized: false });
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
@@ -60,7 +60,15 @@ app.post("/api/enrichir", async (req, res) => {
       }
     }
 
-    // 1. API Geo (fiable)
+    // Helper fetch INSEE avec agent SSL permissif
+    async function fetchInsee(url) {
+      return fetch(url, {
+        agent: inseeAgent,
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+      });
+    }
+
+    // 1. API Geo
     try {
       const rGeo = await fetch("https://geo.api.gouv.fr/communes/" + citycode + "?fields=nom,population,codeDepartement,codeRegion,epci");
       if (rGeo.ok) {
@@ -92,10 +100,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Georisques error:", e.message); }
 
-    // 3. ADEME DPE — URL corrigée 2026
+    // 3. ADEME DPE — nouveau dataset 2024
     try {
-      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=1000&q=" + citycode + "&q_fields=code_commune_insee&select=etiquette_dpe";
-      const rDpe = await fetch(urlDpe);
+      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=500&qs=code_commune_insee%3A" + citycode + "&select=etiquette_dpe";
+      const rDpe = await fetch(urlDpe, { headers: { "User-Agent": "Mozilla/5.0" } });
       console.log("ADEME DPE:", rDpe.status);
       if (rDpe.ok) {
         const d = await rDpe.json();
@@ -112,10 +120,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.message); }
 
-    // 4. RPLS — paramètre corrigé
+    // 4. RPLS — format filtre corrigé
     try {
-      const urlRpls = "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?filters=commune_code=" + citycode + "&page_size=1";
-      const rRpls = await fetch(urlRpls);
+      const urlRpls = "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode;
+      const rRpls = await fetch(urlRpls, { headers: { "User-Agent": "Mozilla/5.0" } });
       console.log("RPLS:", rRpls.status);
       if (rRpls.ok) {
         const d = await rRpls.json();
@@ -125,13 +133,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("RPLS error:", e.message); }
 
-    // 5. BPE INSEE — agent SSL permissif
+    // 5. BPE INSEE
     try {
       const urlBpe = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all";
-      const rBpe = await fetch(urlBpe, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-        agent: inseeAgent,
-      });
+      const rBpe = await fetchInsee(urlBpe);
       console.log("BPE INSEE:", rBpe.status);
       if (rBpe.ok) {
         const d = await rBpe.json();
@@ -154,13 +159,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.message); }
 
-    // 6. Filosofi INSEE — agent SSL permissif
+    // 6. Filosofi INSEE
     try {
       const urlFilo = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all";
-      const rFilo = await fetch(urlFilo, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-        agent: inseeAgent,
-      });
+      const rFilo = await fetchInsee(urlFilo);
       console.log("Filosofi:", rFilo.status);
       if (rFilo.ok) {
         const d = await rFilo.json();
@@ -181,13 +183,10 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Filosofi error:", e.message); }
 
-    // 7. INSEE Recensement population par âge — agent SSL permissif
+    // 7. INSEE Recensement population par âge
     try {
       const urlRp = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all";
-      const rRp = await fetch(urlRp, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-        agent: inseeAgent,
-      });
+      const rRp = await fetchInsee(urlRp);
       console.log("INSEE RP:", rRp.status);
       if (rRp.ok) {
         const d = await rRp.json();
