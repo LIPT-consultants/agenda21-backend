@@ -130,6 +130,15 @@ if (total > 0) {
 }
     } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
+// DEBUG — RP Logement pour v8/v9
+try {
+  const r6 = await inseeAxios.get(
+    "https://api.insee.fr/melodi/data/DS_RP_LOGEMENT?GEO=" + geoCode + "&TIME_PERIOD=2021&maxResult=3&page=1"
+  );
+  console.log("RP Logement:", r6.status, "obs:", r6.data?.observations?.length);
+  console.log("RP Logement sample:", JSON.stringify(r6.data?.observations?.slice(0, 2)));
+} catch (e) { console.log("RP Logement error:", e.response?.status, e.message); }
+    
     // 5. BPE — équipements santé (format GEO et FACILITY_TYPE corrigés)
     try {
       const r5 = await inseeAxios.get(
