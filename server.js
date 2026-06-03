@@ -20,67 +20,6 @@ const defaultAxios = axios.create({
 
 app.get("/", (req, res) => res.json({ status: "ok", app: "Agenda21 Longévité Backend" }));
 
-// ─── ROUTE DEBUG — teste toutes les APIs et retourne les résultats ─────────────
-app.get("/api/debug/:citycode", async (req, res) => {
-  const citycode = req.params.citycode;
-  const report = {};
-
-  // ADEME — on teste plusieurs variantes d'URL
-  const ademeUrls = [
-    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=3&select=etiquette_dpe",
-    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=3&select=etiquette_dpe",
-    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=3&select=etiquette_dpe&qs=code_commune_insee%3A" + citycode,
-  ];
-  for (const url of ademeUrls) {
-    try {
-      const r = await defaultAxios.get(url);
-      report["ademe_" + ademeUrls.indexOf(url)] = { status: r.status, total: r.data?.total, firstResult: r.data?.results?.[0] };
-    } catch (e) {
-      report["ademe_" + ademeUrls.indexOf(url)] = { error: e.response?.status + " " + JSON.stringify(e.response?.data).slice(0, 200) };
-    }
-  }
-
-  // RPLS — plusieurs variantes
-  const rplsUrls = [
-    "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode,
-    "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1",
-  ];
-  for (const url of rplsUrls) {
-    try {
-      const r = await defaultAxios.get(url);
-      report["rpls_" + rplsUrls.indexOf(url)] = { status: r.status, meta: r.data?.meta, firstRow: r.data?.data?.[0] };
-    } catch (e) {
-      report["rpls_" + rplsUrls.indexOf(url)] = { error: e.response?.status + " " + JSON.stringify(e.response?.data).slice(0, 200) };
-    }
-  }
-
-  // INSEE BPE
-  try {
-    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all");
-    report["bpe"] = { status: r.status, hasCellule: !!r.data?.Cellule, count: r.data?.Cellule?.length };
-  } catch (e) {
-    report["bpe"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
-  }
-
-  // INSEE Filosofi
-  try {
-    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all");
-    report["filosofi"] = { status: r.status, hasCellule: !!r.data?.Cellule };
-  } catch (e) {
-    report["filosofi"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
-  }
-
-  // INSEE RP
-  try {
-    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all");
-    report["rp"] = { status: r.status, hasCellule: !!r.data?.Cellule };
-  } catch (e) {
-    report["rp"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
-  }
-
-  res.json(report);
-});
-
 // ─── ROUTE ANALYSE ─────────────────────────────────────────────────────────────
 app.post("/api/analyse", async (req, res) => {
   try {
@@ -109,6 +48,8 @@ app.post("/api/enrichir", async (req, res) => {
   try {
     const { citycode, city, lat, lon } = req.body;
     const results = {};
+    const dept = citycode ? citycode.substring(0, 2) : null;
+
     function set(id, val, source, niveau) {
       if (val !== null && val !== undefined && !isNaN(parseFloat(val))) {
         results[id] = { valeur: String(Math.round(parseFloat(val) * 10) / 10), source, niveau };
@@ -143,10 +84,12 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Georisques error:", e.message); }
 
-    // 3. ADEME DPE
+    // 3. ADEME DPE — recherche par nom de ville (q=city) dans dpe03existant
     try {
-      const r = await defaultAxios.get("https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&qs=code_commune_insee%3A" + citycode);
-      console.log("ADEME DPE:", r.status);
+      const cityEncoded = encodeURIComponent(city || "");
+      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&q=" + cityEncoded;
+      const r = await defaultAxios.get(urlDpe);
+      console.log("ADEME DPE:", r.status, "résultats:", r.data?.results?.length);
       const d = r.data;
       if (d.results && d.results.length > 0) {
         let total = d.results.length, efg = 0, renove = 0;
@@ -160,75 +103,82 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. RPLS
+    // 4. RPLS via API INSEE Melodi — nb logements sociaux par commune
     try {
-      const r = await defaultAxios.get("https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode);
-      console.log("RPLS:", r.status);
-      const d = r.data;
-      if (d && d.meta && d.meta.total > 0) {
-        results["_meta_rpls"] = { valeur: d.meta.total + " logements sociaux", source: "RPLS 2023 — data.gouv.fr", niveau: "commune" };
+      const urlRpls = "https://api.insee.fr/melodi/data/DS_RPLS_LOGEMENT?GEO=COM-" + citycode + "&TIME_PERIOD=2023&INDICATEUR=NB_LOG&maxResult=5";
+      const r = await inseeAxios.get(urlRpls);
+      console.log("RPLS Melodi:", r.status);
+      const obs = r.data?.dataSets?.[0]?.observations;
+      if (obs) {
+        const vals = Object.values(obs);
+        if (vals.length > 0 && vals[0][0] !== null) {
+          const total = vals.reduce((a, v) => a + (v[0] || 0), 0);
+          if (total > 0) results["_meta_rpls"] = { valeur: Math.round(total) + " logements sociaux", source: "RPLS INSEE 2023", niveau: "commune" };
+        }
       }
-    } catch (e) { console.log("RPLS error:", e.response?.status, e.message); }
+    } catch (e) { console.log("RPLS Melodi error:", e.response?.status, e.message); }
 
-    // 5. BPE INSEE
+    // 5. BPE — via API Melodi INSEE
     try {
-      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all");
-      console.log("BPE INSEE:", r.status);
-      const d = r.data;
-      if (d && d.Cellule) {
+      const urlBpe = "https://api.insee.fr/melodi/data/DS_BPE_ENS?GEO=COM-" + citycode + "&TIME_PERIOD=2021&TYPEQU=D201,D401,D109,D110,D107&maxResult=50";
+      const r = await inseeAxios.get(urlBpe);
+      console.log("BPE Melodi:", r.status);
+      const series = r.data?.dataSets?.[0]?.series;
+      if (series) {
         let medecins = 0, pharmacies = 0, ehpad = 0, services = 0;
-        d.Cellule.forEach((c) => {
-          const type = (c.Modalite || []).find((m) => m["@variable"] === "TYPEQU");
-          const v = parseFloat(c.Valeur || 0);
-          if (!type) return;
-          const code = type["@code"];
-          if (code === "D201") medecins += v;
-          if (code === "D401") pharmacies += v;
-          if (["D109", "D110"].includes(code)) ehpad += v;
-          if (code === "D107") services += v;
+        Object.entries(series).forEach(([key, val]) => {
+          const obs = Object.values(val.observations || {});
+          const v = obs[0]?.[0] || 0;
+          if (key.includes("D201")) medecins += v;
+          if (key.includes("D401")) pharmacies += v;
+          if (key.includes("D109") || key.includes("D110")) ehpad += v;
+          if (key.includes("D107")) services += v;
         });
         const partenaires = (medecins > 0 ? 1 : 0) + (ehpad > 0 ? 2 : 0) + (services > 0 ? 2 : 0) + (pharmacies > 0 ? 1 : 0);
         if (partenaires > 0) set("pt1", partenaires, "INSEE BPE 2021", "commune");
         results["_meta_bpe"] = { valeur: Math.round(medecins) + " médecins, " + Math.round(pharmacies) + " pharmacies, " + Math.round(ehpad) + " EHPAD", source: "INSEE BPE 2021", niveau: "commune" };
       }
-    } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
+    } catch (e) { console.log("BPE Melodi error:", e.response?.status, e.message); }
 
-    // 6. Filosofi
+    // 6. Filosofi — via API Melodi INSEE (taux pauvreté + revenu médian)
     try {
-      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all");
-      console.log("Filosofi:", r.status);
-      const d = r.data;
-      if (d && d.Cellule) {
-        d.Cellule.forEach((c) => {
-          const indic = (c.Modalite || []).find((m) => m["@variable"] === "INDIC");
-          if (!indic) return;
-          const val = parseFloat(c.Valeur);
-          if (indic["@code"] === "TP60" && !isNaN(val) && val > 0) {
-            set("v14", val / 100 * 0.35, "INSEE Filosofi 2020", "commune");
-            results["_meta_pauvrete"] = { valeur: "Taux pauvreté : " + val + "%", source: "INSEE Filosofi 2020", niveau: "commune" };
+      const urlFilo = "https://api.insee.fr/melodi/data/DS_FILOSOFI?GEO=COM-" + citycode + "&TIME_PERIOD=2020&INDIC=TP60,MED&maxResult=10";
+      const r = await inseeAxios.get(urlFilo);
+      console.log("Filosofi Melodi:", r.status);
+      const series = r.data?.dataSets?.[0]?.series;
+      if (series) {
+        Object.entries(series).forEach(([key, val]) => {
+          const obs = Object.values(val.observations || {});
+          const v = parseFloat(obs[0]?.[0]);
+          if (isNaN(v)) return;
+          if (key.includes("TP60") && v > 0) {
+            set("v14", v / 100 * 0.35, "INSEE Filosofi 2020", "commune");
+            results["_meta_pauvrete"] = { valeur: "Taux pauvreté : " + v + "%", source: "INSEE Filosofi 2020", niveau: "commune" };
           }
-          if (indic["@code"] === "MED21" && !isNaN(val) && val > 0) {
-            results["_meta_revenu"] = { valeur: Math.round(val) + " €/an (revenu médian)", source: "INSEE Filosofi 2020", niveau: "commune" };
+          if (key.includes("MED") && v > 0) {
+            results["_meta_revenu"] = { valeur: Math.round(v) + " €/an (revenu médian)", source: "INSEE Filosofi 2020", niveau: "commune" };
           }
         });
       }
-    } catch (e) { console.log("Filosofi error:", e.response?.status, e.message); }
+    } catch (e) { console.log("Filosofi Melodi error:", e.response?.status, e.message); }
 
-    // 7. INSEE RP
+    // 7. Recensement population par âge — via API Melodi INSEE
     try {
-      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all");
-      console.log("INSEE RP:", r.status);
-      const d = r.data;
-      if (d && d.Cellule) {
+      const urlRp = "https://api.insee.fr/melodi/data/DS_RP_POP?GEO=COM-" + citycode + "&TIME_PERIOD=2020&AGEPYR5=Y60T64,Y65T69,Y70T74,Y75T79,Y80T84,Y85T89,Y90&maxResult=100";
+      const r = await inseeAxios.get(urlRp);
+      console.log("INSEE RP Melodi:", r.status);
+      const dsSeries = r.data?.dataSets?.[0]?.series;
+      if (dsSeries) {
         let total = 0, s60 = 0, s75 = 0, s85 = 0;
-        d.Cellule.forEach((c) => {
-          const age = (c.Modalite || []).find((m) => m["@variable"] === "AGE15_15_90");
-          const v = parseFloat(c.Valeur || 0);
-          if (!age) return;
-          total += v;
-          if (["60-74", "75-89", "90+"].includes(age["@code"])) s60 += v;
-          if (["75-89", "90+"].includes(age["@code"])) s75 += v;
-          if (age["@code"] === "90+") s85 += v;
+        // On récupère la population totale depuis Geo
+        const popMeta = results["_meta_population"];
+        if (popMeta) total = parseFloat(popMeta.valeur) || 0;
+        Object.entries(dsSeries).forEach(([key, val]) => {
+          const obs = Object.values(val.observations || {});
+          const v = parseFloat(obs[0]?.[0] || 0);
+          s60 += v;
+          if (key.includes("Y75") || key.includes("Y80") || key.includes("Y85") || key.includes("Y90")) s75 += v;
+          if (key.includes("Y85") || key.includes("Y90")) s85 += v;
         });
         if (total > 0) {
           set("v1", s60 / total * 100, "INSEE RP 2020", "commune");
@@ -236,7 +186,7 @@ app.post("/api/enrichir", async (req, res) => {
           set("v3", s85 / total * 100, "INSEE RP 2020", "commune");
         }
       }
-    } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
+    } catch (e) { console.log("INSEE RP Melodi error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
