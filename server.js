@@ -1,15 +1,19 @@
 const express = require("express");
 const cors = require("cors");
 const fetch = require("node-fetch");
+const https = require("https");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ─── HEALTH CHECK ────────────────────────────────────────────────────────────
+// Agent HTTPS qui ignore les erreurs de certificat SSL (pour data.insee.fr)
+const inseeAgent = new https.Agent({ rejectUnauthorized: false });
+
+// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.json({ status: "ok", app: "Agenda21 Longévité Backend" }));
 
-// ─── ROUTE ANALYSE (Claude / Anthropic) ──────────────────────────────────────
+// ─── ROUTE ANALYSE (Claude / Anthropic) ───────────────────────────────────────
 app.post("/api/analyse", async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -44,7 +48,7 @@ app.post("/api/analyse", async (req, res) => {
   }
 });
 
-// ─── ROUTE ENRICHIR (APIs publiques françaises) ───────────────────────────────
+// ─── ROUTE ENRICHIR (APIs publiques françaises) ────────────────────────────────
 app.post("/api/enrichir", async (req, res) => {
   try {
     const { citycode, city, lat, lon } = req.body;
@@ -70,7 +74,7 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Geo error:", e.message); }
 
-    // 2. Georisques (fiable)
+    // 2. Georisques
     try {
       if (lat && lon) {
         const rGR = await fetch("https://georisques.gouv.fr/api/v1/gaspar/risques?rayon=1000&latlon=" + lon + "," + lat + "&page=1&page_size=20");
@@ -88,9 +92,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Georisques error:", e.message); }
 
-    // 3. ADEME DPE
+    // 3. ADEME DPE — URL corrigée 2026
     try {
-      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=1000&qs=code_commune_insee:" + citycode + "&select=etiquette_dpe";
+      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=1000&q=" + citycode + "&q_fields=code_commune_insee&select=etiquette_dpe";
       const rDpe = await fetch(urlDpe);
       console.log("ADEME DPE:", rDpe.status);
       if (rDpe.ok) {
@@ -108,9 +112,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("ADEME error:", e.message); }
 
-    // 4. RPLS
+    // 4. RPLS — paramètre corrigé
     try {
-      const urlRpls = "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?commune_code=" + citycode + "&page_size=1";
+      const urlRpls = "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?filters=commune_code=" + citycode + "&page_size=1";
       const rRpls = await fetch(urlRpls);
       console.log("RPLS:", rRpls.status);
       if (rRpls.ok) {
@@ -121,10 +125,13 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("RPLS error:", e.message); }
 
-    // 5. BPE INSEE
+    // 5. BPE INSEE — agent SSL permissif
     try {
       const urlBpe = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all";
-      const rBpe = await fetch(urlBpe, { headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" } });
+      const rBpe = await fetch(urlBpe, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        agent: inseeAgent,
+      });
       console.log("BPE INSEE:", rBpe.status);
       if (rBpe.ok) {
         const d = await rBpe.json();
@@ -147,10 +154,13 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.message); }
 
-    // 6. Filosofi INSEE
+    // 6. Filosofi INSEE — agent SSL permissif
     try {
       const urlFilo = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all";
-      const rFilo = await fetch(urlFilo, { headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" } });
+      const rFilo = await fetch(urlFilo, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        agent: inseeAgent,
+      });
       console.log("Filosofi:", rFilo.status);
       if (rFilo.ok) {
         const d = await rFilo.json();
@@ -171,10 +181,13 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Filosofi error:", e.message); }
 
-    // 7. INSEE Recensement population par âge
+    // 7. INSEE Recensement population par âge — agent SSL permissif
     try {
       const urlRp = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all";
-      const rRp = await fetch(urlRp, { headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" } });
+      const rRp = await fetch(urlRp, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        agent: inseeAgent,
+      });
       console.log("INSEE RP:", rRp.status);
       if (rRp.ok) {
         const d = await rRp.json();
@@ -207,6 +220,6 @@ app.post("/api/enrichir", async (req, res) => {
   }
 });
 
-// ─── DÉMARRAGE ───────────────────────────────────────────────────────────────
+// ─── DÉMARRAGE ────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Agenda21 Backend démarré sur le port ${PORT}`));
