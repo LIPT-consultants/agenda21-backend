@@ -159,30 +159,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-// 6. Filosofi — taux pauvreté et revenu médian (millésime 2021, dernier disponible)
-try {
-  const r = await inseeAxios.get(
-    "https://api.insee.fr/melodi/data/DS_FILOSOFI_MEN_TP_NIVVIE?GEO=COM-" + citycode + "&TIME_PERIOD=2021&maxResult=50"
-  );
-  console.log("Filosofi:", r.status);
-  const series = r.data?.dataSets?.[0]?.series;
-  if (series) {
-    Object.entries(series).forEach(([key, val]) => {
-      const obs = Object.values(val.observations || {});
-      const v = parseFloat(obs[0]?.[0]);
-      if (isNaN(v) || v <= 0) return;
-      if (key.includes("TP60")) {
-        set("v14", v / 100 * 0.35, "INSEE Filosofi 2021", "commune");
-        results["_meta_pauvrete"] = { valeur: "Taux pauvreté : " + v + "%", source: "INSEE Filosofi 2021", niveau: "commune" };
-      }
-      if (key.includes("MED") && v > 1000) {
-        results["_meta_revenu"] = { valeur: Math.round(v) + " €/an (revenu médian)", source: "INSEE Filosofi 2021", niveau: "commune" };
-      }
-    });
-  }
-} catch (e) {
-  console.log("Filosofi error:", e.response?.status, JSON.stringify(e.response?.data)?.slice(0, 300));
-}
+// 6. Filosofi — non disponible via Melodi (dataset retiré)
+// v14 (taux d'effort seniors) à saisir manuellement
+console.log("Filosofi: non disponible via API, saisie manuelle requise");
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
