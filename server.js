@@ -7,27 +7,85 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Agent HTTPS permissif pour les APIs avec certificats non reconnus (INSEE)
 const inseeAxios = axios.create({
   httpsAgent: new https.Agent({ rejectUnauthorized: false }),
   headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-  timeout: 15000,
+  timeout: 20000,
 });
 
 const defaultAxios = axios.create({
   headers: { "User-Agent": "Mozilla/5.0" },
-  timeout: 15000,
+  timeout: 20000,
 });
 
-// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.json({ status: "ok", app: "Agenda21 Longévité Backend" }));
 
-// ─── ROUTE ANALYSE (Claude / Anthropic) ───────────────────────────────────────
+// ─── ROUTE DEBUG — teste toutes les APIs et retourne les résultats ─────────────
+app.get("/api/debug/:citycode", async (req, res) => {
+  const citycode = req.params.citycode;
+  const report = {};
+
+  // ADEME — on teste plusieurs variantes d'URL
+  const ademeUrls = [
+    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=3&select=etiquette_dpe",
+    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-logements-existants/lines?size=3&select=etiquette_dpe",
+    "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=3&select=etiquette_dpe&qs=code_commune_insee%3A" + citycode,
+  ];
+  for (const url of ademeUrls) {
+    try {
+      const r = await defaultAxios.get(url);
+      report["ademe_" + ademeUrls.indexOf(url)] = { status: r.status, total: r.data?.total, firstResult: r.data?.results?.[0] };
+    } catch (e) {
+      report["ademe_" + ademeUrls.indexOf(url)] = { error: e.response?.status + " " + JSON.stringify(e.response?.data).slice(0, 200) };
+    }
+  }
+
+  // RPLS — plusieurs variantes
+  const rplsUrls = [
+    "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode,
+    "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1",
+  ];
+  for (const url of rplsUrls) {
+    try {
+      const r = await defaultAxios.get(url);
+      report["rpls_" + rplsUrls.indexOf(url)] = { status: r.status, meta: r.data?.meta, firstRow: r.data?.data?.[0] };
+    } catch (e) {
+      report["rpls_" + rplsUrls.indexOf(url)] = { error: e.response?.status + " " + JSON.stringify(e.response?.data).slice(0, 200) };
+    }
+  }
+
+  // INSEE BPE
+  try {
+    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all");
+    report["bpe"] = { status: r.status, hasCellule: !!r.data?.Cellule, count: r.data?.Cellule?.length };
+  } catch (e) {
+    report["bpe"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
+  }
+
+  // INSEE Filosofi
+  try {
+    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all");
+    report["filosofi"] = { status: r.status, hasCellule: !!r.data?.Cellule };
+  } catch (e) {
+    report["filosofi"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
+  }
+
+  // INSEE RP
+  try {
+    const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all");
+    report["rp"] = { status: r.status, hasCellule: !!r.data?.Cellule };
+  } catch (e) {
+    report["rp"] = { error: e.response?.status + " " + e.message + " " + JSON.stringify(e.response?.data).slice(0, 200) };
+  }
+
+  res.json(report);
+});
+
+// ─── ROUTE ANALYSE ─────────────────────────────────────────────────────────────
 app.post("/api/analyse", async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt manquant" });
-
     const response = await defaultAxios.post("https://api.anthropic.com/v1/messages", {
       model: "claude-sonnet-4-5",
       max_tokens: 1000,
@@ -39,22 +97,18 @@ app.post("/api/analyse", async (req, res) => {
         "anthropic-version": "2023-06-01",
       },
     });
-
     const text = (response.data.content || []).map((b) => b.text || "").join("\n");
     res.json({ text });
-
   } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message;
-    res.status(500).json({ error: "Erreur serveur : " + msg });
+    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
   }
 });
 
-// ─── ROUTE ENRICHIR (APIs publiques françaises) ────────────────────────────────
+// ─── ROUTE ENRICHIR ────────────────────────────────────────────────────────────
 app.post("/api/enrichir", async (req, res) => {
   try {
     const { citycode, city, lat, lon } = req.body;
     const results = {};
-
     function set(id, val, source, niveau) {
       if (val !== null && val !== undefined && !isNaN(parseFloat(val))) {
         results[id] = { valeur: String(Math.round(parseFloat(val) * 10) / 10), source, niveau };
@@ -89,10 +143,9 @@ app.post("/api/enrichir", async (req, res) => {
       }
     } catch (e) { console.log("Georisques error:", e.message); }
 
-    // 3. ADEME DPE — identifiant dataset corrigé
+    // 3. ADEME DPE
     try {
-      const urlDpe = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&q=" + citycode + "&q_fields=code_commune_insee";
-      const r = await defaultAxios.get(urlDpe);
+      const r = await defaultAxios.get("https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?size=500&select=etiquette_dpe&qs=code_commune_insee%3A" + citycode);
       console.log("ADEME DPE:", r.status);
       const d = r.data;
       if (d.results && d.results.length > 0) {
@@ -105,23 +158,21 @@ app.post("/api/enrichir", async (req, res) => {
         set("te2", renove / total * 100, "ADEME DPE 2025", "commune");
         results["_meta_dpe"] = { valeur: total + " DPE : " + Math.round(efg / total * 100) + "% EFG, " + Math.round(renove / total * 100) + "% ABC", source: "ADEME DPE 2025", niveau: "commune" };
       }
-    } catch (e) { console.log("ADEME error:", e.message); }
+    } catch (e) { console.log("ADEME error:", e.response?.status, e.message); }
 
-    // 4. RPLS — recherche par texte sur code commune
+    // 4. RPLS
     try {
-      const urlRpls = "https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode;
-      const r = await defaultAxios.get(urlRpls);
+      const r = await defaultAxios.get("https://tabular-api.data.gouv.fr/api/resources/7649e51e-9418-4173-9dc6-cefb94bbd7c0/data/?page_size=1&commune_code__exact=" + citycode);
       console.log("RPLS:", r.status);
       const d = r.data;
       if (d && d.meta && d.meta.total > 0) {
         results["_meta_rpls"] = { valeur: d.meta.total + " logements sociaux", source: "RPLS 2023 — data.gouv.fr", niveau: "commune" };
       }
-    } catch (e) { console.log("RPLS error:", e.message); }
+    } catch (e) { console.log("RPLS error:", e.response?.status, e.message); }
 
-    // 5. BPE INSEE — axios avec agent SSL permissif
+    // 5. BPE INSEE
     try {
-      const urlBpe = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all";
-      const r = await inseeAxios.get(urlBpe);
+      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-TYPEQU@BPE2021/COM-" + citycode + ".all");
       console.log("BPE INSEE:", r.status);
       const d = r.data;
       if (d && d.Cellule) {
@@ -140,12 +191,11 @@ app.post("/api/enrichir", async (req, res) => {
         if (partenaires > 0) set("pt1", partenaires, "INSEE BPE 2021", "commune");
         results["_meta_bpe"] = { valeur: Math.round(medecins) + " médecins, " + Math.round(pharmacies) + " pharmacies, " + Math.round(ehpad) + " EHPAD", source: "INSEE BPE 2021", niveau: "commune" };
       }
-    } catch (e) { console.log("BPE error:", e.message); }
+    } catch (e) { console.log("BPE error:", e.response?.status, e.message); }
 
-    // 6. Filosofi INSEE
+    // 6. Filosofi
     try {
-      const urlFilo = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all";
-      const r = await inseeAxios.get(urlFilo);
+      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-INDIC@FILOSOFI2020/COM-" + citycode + ".all");
       console.log("Filosofi:", r.status);
       const d = r.data;
       if (d && d.Cellule) {
@@ -162,12 +212,11 @@ app.post("/api/enrichir", async (req, res) => {
           }
         });
       }
-    } catch (e) { console.log("Filosofi error:", e.message); }
+    } catch (e) { console.log("Filosofi error:", e.response?.status, e.message); }
 
-    // 7. INSEE Recensement population par âge
+    // 7. INSEE RP
     try {
-      const urlRp = "https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all";
-      const r = await inseeAxios.get(urlRp);
+      const r = await inseeAxios.get("https://data.insee.fr/api/donnees-locales/V0.1/donnees/geo-SEXE-AGE15_15_90@GEO2023RP2020/COM-" + citycode + ".all.all");
       console.log("INSEE RP:", r.status);
       const d = r.data;
       if (d && d.Cellule) {
@@ -187,17 +236,15 @@ app.post("/api/enrichir", async (req, res) => {
           set("v3", s85 / total * 100, "INSEE RP 2020", "commune");
         }
       }
-    } catch (e) { console.log("INSEE RP error:", e.message); }
+    } catch (e) { console.log("INSEE RP error:", e.response?.status, e.message); }
 
     console.log("Résultats finaux:", Object.keys(results));
     res.json(results);
-
   } catch (err) {
     console.log("Erreur globale:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── DÉMARRAGE ────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Agenda21 Backend démarré sur le port ${PORT}`));
